@@ -1,0 +1,52 @@
+name: Validate issue 12479 on Linux
+
+on:
+  push:
+    branches:
+      - codex/validate-iceberg-rewrite-results
+
+permissions:
+  contents: read
+
+jobs:
+  jobs-module:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Limit local build memory
+        run: |
+          cat > "$RUNNER_TEMP/jobs-memory.gradle" <<'EOF'
+          gradle.projectsEvaluated {
+            allprojects {
+              tasks.withType(Test).configureEach {
+                jvmArgs = jvmArgs.findAll { !it.startsWith('-Xmx') }
+                maxHeapSize = '2g'
+                maxParallelForks = 1
+              }
+            }
+          }
+          EOF
+      - name: Check the complete jobs module without Docker tests
+        run: >-
+          ./gradlew -I "$RUNNER_TEMP/jobs-memory.gradle"
+          '-Dorg.gradle.jvmargs=-Xmx1g'
+          :maintenance:jobs:check
+          -PskipTrinoConnector=true -PskipITs -PskipDockerTests=true
+          --max-workers=2 --console=plain
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-12479-test-reports
+          path: |
+            maintenance/jobs/build/test-results/test/
+            build/reports/tests/maintenance/jobs/test/
+          retention-days: 3
